@@ -17,8 +17,20 @@
 | **notifications 表** | 核心 Outbox 表，存储通知消息、投递状态、重试计数、下次重试时间 |
 | **delivery_logs 表** | 每次投递尝试的详细记录（状态码、响应体、耗时、错误信息），用于排查和审计 |
 | **vendor_configs 表** | 供应商配置（URL、Header/Body 模板、签名密钥、超时时间、最大重试次数） |
-| **数据库迁移** | Schema 版本管理，使用 golang-migrate 管理 DDL 变更 |
+| **数据库迁移** | Schema 版本管理，使用 Flyway 管理 DDL 变更 |
 | **LISTEN/NOTIFY** | 写入 notifications 后触发 PG NOTIFY，实时通知调度引擎有新消息待投递 |
+
+### 为什么选择 PostgreSQL 而非 MySQL
+
+| 维度 | PostgreSQL 优势 | MySQL 劣势 |
+|---|---|---|
+| 实时通知 | LISTEN/NOTIFY 原生支持，插入数据后自动通知调度引擎，ms 级延迟 | 无等价能力，只能靠轮询（秒级延迟）或引入 MQ（运维复杂） |
+| 索引效率 | 部分索引（Partial Index），只索引 `status IN ('PENDING','RETRYING')` 的记录，体积小、命中率高 | 不支持部分索引，必须全量索引，大量已完成记录也被索引，浪费空间且降低查询效率 |
+| JSON 性能 | JSONB 二进制存储 + GIN 索引，按键取值性能优异 | 文本存储，每次查询需解析，性能较差 |
+| 并发安全 | `UPDATE ... RETURNING *` 原子操作，CAS 抢占一步完成 | UPDATE 后再 SELECT，两步操作存在间隙 |
+| 运维成本 | 不需要 MQ 即可实现实时投递，一库双用（存储+消息） | 需引入 MQ 补偿实时通知能力，增加运维复杂度 |
+
+**核心判断**：本项目的核心需求是"先落库、再实时投递"，PG 的 LISTEN/NOTIFY + 部分索引 + JSONB 恰好是解决这个问题的最佳组合，而 MySQL 在这三个维度上都缺乏原生支持。
 
 ## 3. 调度引擎
 
