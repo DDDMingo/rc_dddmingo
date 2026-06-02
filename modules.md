@@ -56,11 +56,49 @@
 
 | 子模块 | 职责 |
 |---|---|
+| **熔断器（CircuitBreakerManager）** | 每个供应商独立熔断器，按 vendor_code 隔离。投递前拦截故障供应商，投递后反馈结果驱动状态转换 |
 | **指数退避计算** | 根据重试次数计算下次重试时间：`base * 2^n + random_jitter`，避免惊群效应 |
 | **退避时间写入** | 更新 notifications 表的 `next_retry_at` 和 `retry_count`，使消息重新进入调度队列 |
 | **死信处理** | 超过最大重试次数或收到 4xx 的通知，标记为 `dead_letter` 终态，不再重试 |
 | **死信告警** | 产生死信时触发告警（日志 + 指标），通知运维人员介入 |
 | **手动重投递** | 提供管理 API，允许运维修复问题后手动将死信消息重新投递（状态重置为 pending） |
+
+### 熔断器在全链路中的作用点
+
+熔断器（CircuitBreakerManager）在投递链路中有 2 个作用点，均位于 DeliveryService：
+
+**作用点 1：投递前拦截**
+
+在模板渲染和 HTTP 投递之前，检查目标供应商的熔断器状态。若熔断器处于 OPEN 状态，直接跳过 HTTP 调用，按重试处理（计算退避时间），避免无意义的请求打向已故障的外部系统，同时保护本系统不被拖垮。
+
+**作用点 2：投递后反馈**
+
+每次投递结果都反馈给熔断器，驱动状态转换：
+- 投递成功 → `recordSuccess()` → 重置失败计数，HalfOpen 状态下回到 Closed
+- 投递失败 → `recordFailure()` → 累计失败计数，连续失败达阈值时从 Closed 转为 Open
+
+**供应商隔离**：每个供应商拥有独立的熔断器实例（如 `vendor-ad-system`、`vendor-crm-system`），一个供应商熔断不影响其他供应商的投递。
+
+**状态转换**：Closed（正常）→ 连续失败达阈值 → Open（熔断，拒绝投递）→ 等待冷却（60s）→ HalfOpen（半开，放行探测请求）→ 探测成功回到 Closed / 探测失败回到 Open
+
+**全链路调用时序**：
+```
+DeliveryService.deliver(notification)
+  │
+  ├─① isCircuitOpen(vendorCode)         ← 投递前拦截
+  │     ├─ Open → 直接走重试（不发 HTTP）
+  │     └─ Closed/HalfOpen → 继续投递
+  │
+  ├─ templateRenderer.render()
+  ├─ httpDeliveryClient.send()
+  │
+  ├─② 成功 → recordSuccess()            ← 投递后反馈
+  │          → notification.status = SUCCESS
+  │
+  └─② 失败 → recordFailure()            ← 投递后反馈
+             → notification.status = RETRYING / DEAD_LETTER
+             → 失败计数累计 → 可能触发 Closed→Open 转换
+```
 
 ## 6. 观测层
 
