@@ -13,7 +13,6 @@ import org.springframework.stereotype.Component;
 import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 
 @Slf4j
 @Component
@@ -23,18 +22,14 @@ public class NotificationScheduler {
     private final NotificationRepository notificationRepository;
     private final DeliveryService deliveryService;
     private final AppProperties appProperties;
-
-    private final ExecutorService workerPool = Executors.newFixedThreadPool(
-            Runtime.getRuntime().availableProcessors(),
-            r -> {
-                Thread t = new Thread(r, "notification-worker");
-                t.setDaemon(true);
-                return t;
-            }
-    );
+    private final ExecutorService notificationWorkerPool;
 
     /**
      * 定时轮询扫描待投递的通知（兜底补偿）
+     *
+     * 与 PgListener 互补：
+     * - PgListener 负责实时触发（ms 级）
+     * - 本调度器负责兜底扫描（5s 间隔），补偿 NOTIFY 丢失或实例启动时的遗漏
      */
     @Scheduled(fixedDelayString = "${notification.scheduler.poll-interval:5000}")
     public void pollPendingNotifications() {
@@ -45,8 +40,12 @@ public class NotificationScheduler {
         List<Notification> pending = notificationRepository.findPendingNotifications(
                 pendingStatuses, OffsetDateTime.now());
 
+        if (!pending.isEmpty()) {
+            log.debug("Polling found {} pending notifications", pending.size());
+        }
+
         for (Notification notification : pending) {
-            workerPool.submit(() -> {
+            notificationWorkerPool.submit(() -> {
                 try {
                     deliveryService.deliver(notification);
                 } catch (Exception e) {

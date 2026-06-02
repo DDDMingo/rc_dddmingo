@@ -25,4 +25,5 @@
 /Users/mingo/project/rc_dddmingo/src/main/java/com/dddmingo/notification/retry/BackoffStrategy.java
 /Users/mingo/project/rc_dddmingo/src/main/java/com/dddmingo/notification/scheduler/NotificationScheduler.java
 /Users/mingo/project/rc_dddmingo/src/main/java/com/dddmingo/notification/scheduler/PgListener.java
+/Users/mingo/project/rc_dddmingo/src/main/java/com/dddmingo/notification/scheduler/SchedulerConfig.java
 /Users/mingo/project/rc_dddmingo/src/main/java/com/dddmingo/notification/service/NotificationService.java

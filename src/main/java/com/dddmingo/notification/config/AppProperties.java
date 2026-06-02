@@ -17,6 +17,8 @@ public class AppProperties {
     public static class Scheduler {
         private long pollInterval = 5000;
         private int workerPoolSize = 10;
+        private String listenChannel = "notification_channel";
+        private long listenPollMs = 500;
     }
 
     @Data

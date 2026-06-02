@@ -27,6 +27,8 @@ notification:
   scheduler:
     poll-interval: 5000
     worker-pool-size: 10
+    listen-channel: notification_channel   # PG LISTEN/NOTIFY 通道名，需与触发器中 pg_notify 的通道一致
+    listen-poll-ms: 500                   # PG LISTEN 轮询间隔（毫秒），越小延迟越低但 CPU 开销越高
   retry:
     base-delay-seconds: 10
     max-retries: 6
